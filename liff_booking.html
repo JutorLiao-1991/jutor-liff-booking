@@ -4,153 +4,230 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>鳩特數理 - 預約試聽</title>
+    <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <!-- LINE LIFF SDK -->
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <!-- 🌟 引入 SweetAlert2 (超美彈窗套件) -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     
     <style>
         body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
-        .container { max-width: 400px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        h2 { text-align: center; color: #333; }
+        .container { max-width: 450px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #333; margin-top: 0; }
         .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; color: #666; font-weight: bold; }
-        input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; font-size: 16px; }
-        button { width: 100%; padding: 12px; background-color: #06C755; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; font-weight: bold; }
+        .form-row { display: flex; gap: 10px; margin-bottom: 15px; }
+        .form-row .form-group { flex: 1; margin-bottom: 0; }
+        label { display: block; margin-bottom: 5px; color: #555; font-weight: bold; font-size: 14px; }
+        input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 15px; }
+        input:focus, select:focus { border-color: #06C755; outline: none; box-shadow: 0 0 5px rgba(6,199,85,0.3); }
+        button { width: 100%; padding: 14px; background-color: #06C755; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold; transition: 0.3s; }
         button:disabled { background-color: #ccc; cursor: not-allowed; }
         #loading { text-align: center; color: #06C755; margin-bottom: 15px; font-weight: bold; }
+        /* 🌟 下次上課時間的提示文字樣式 */
+        #nextTimeHint { display: block; margin-top: 5px; font-size: 13px; color: #E50914; font-weight: bold; }
+        .section-title { border-bottom: 2px solid #06C755; padding-bottom: 5px; margin-top: 25px; margin-bottom: 15px; color: #333; font-size: 16px; font-weight: bold;}
     </style>
 </head>
 <body>
 
 <div class="container">
     <h2>預約試聽</h2>
-    
     <div id="loading">系統連線中... 請稍候</div>
     
     <form id="trialForm" style="display: none;">
+        <div class="section-title">👤 基本資料</div>
         <div class="form-group">
-            <label for="name">學生姓名</label>
-            <input type="text" id="name" required placeholder="請輸入學生姓名">
+            <label for="name">學生姓名 <span style="color:red">*</span></label>
+            <input type="text" id="name" required placeholder="請輸入真實姓名">
         </div>
+        
         <div class="form-group">
-            <label for="course">想試聽的課程</label>
+            <label for="course">想試聽的課程 <span style="color:red">*</span></label>
             <select id="course" required disabled>
                 <option value="">⏳ 課程載入中...</option>
             </select>
+            <!-- 🌟 動態顯示下次試聽時間 -->
+            <span id="nextTimeHint"></span>
         </div>
+
         <div class="form-group">
-            <label for="trial_date">預計試聽日期</label>
+            <label for="trial_date">希望試聽日期 <span style="color:red">*</span></label>
             <input type="date" id="trial_date" required>
         </div>
-        <div class="form-group">
-            <label for="phone">聯絡電話</label>
-            <input type="tel" id="phone" required placeholder="0912345678">
+
+        <div class="section-title">📞 聯絡方式 (請至少填寫一項)</div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label for="phone_student">學生手機</label>
+                <input type="tel" id="phone_student" class="phone-input" placeholder="09...">
+            </div>
+            <div class="form-group">
+                <label for="phone_home">家裡電話</label>
+                <input type="tel" id="phone_home" class="phone-input" placeholder="03...">
+            </div>
         </div>
-        <button type="submit" id="submitBtn">送出預約</button>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label for="phone_dad">父親手機</label>
+                <input type="tel" id="phone_dad" class="phone-input" placeholder="09...">
+            </div>
+            <div class="form-group">
+                <label for="phone_mom">母親手機</label>
+                <input type="tel" id="phone_mom" class="phone-input" placeholder="09...">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="phone_other">其他聯絡方式 (備註)</label>
+            <input type="text" id="phone_other" placeholder="阿公/阿嬤 或 LINE ID等...">
+        </div>
+
+        <button type="submit" id="submitBtn" style="margin-top: 10px;">確認送出</button>
     </form>
 </div>
 
 <script>
-    // ==========================================
-    // 🔴 替換區 1：填入你的 Firebase 金鑰
-    // ==========================================
+    // 🔴 替換區：你的 Firebase 金鑰
     const firebaseConfig = {
         apiKey: "AIzaSyADP9HfxjVQOAD0zxGtWvMk_nRposqyqSY",
         authDomain: "shiftar-jutor.firebaseapp.com",
         projectId: "shiftar-jutor"
     };
-    
-    // 初始化 Firebase
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
-    // ==========================================
-    // 🔴 替換區 2：填入你在 LINE 後台拿到的 LIFF ID
-    // ==========================================
+    // 🔴 替換區：你的 LIFF ID
     const myLiffId = "2010319288-H6zr1ioX"; 
     
     let lineProfile = null; 
+    let courseTimeMap = {}; // 用來存「課程: 下次時間」的對照表
 
-    // 🌟 功能 1：去資料庫動態撈取課程清單
+    // 🌟 功能 1：去資料庫撈取你剛剛在 ERP 按下同步的乾淨課程表
     async function loadCourses() {
         const courseSelect = document.getElementById("course");
         try {
-            const docRef = await db.collection("settings").doc("courses").get();
+            const docRef = await db.collection("settings").doc("public_courses").get();
             if (docRef.exists) {
-                const courseList = docRef.data().list || [];
+                courseTimeMap = docRef.data().courses || {};
+                const courseNames = Object.keys(courseTimeMap).sort(); // 字母排序
+                
                 courseSelect.innerHTML = '<option value="">請選擇...</option>';
-                courseList.forEach(courseName => {
+                courseNames.forEach(cName => {
                     const option = document.createElement("option");
-                    option.value = courseName;
-                    option.textContent = courseName;
+                    option.value = cName;
+                    option.textContent = cName;
                     courseSelect.appendChild(option);
                 });
-                courseSelect.disabled = false; // 解鎖下拉選單
+                courseSelect.disabled = false;
             } else {
                 courseSelect.innerHTML = '<option value="">(目前無開放課程)</option>';
             }
         } catch (error) {
-            console.error("無法載入課程清單:", error);
-            courseSelect.innerHTML = '<option value="">載入失敗，請重整網頁</option>';
+            console.error("無法載入課程:", error);
+            courseSelect.innerHTML = '<option value="">載入失敗</option>';
         }
     }
 
-    // 🌟 功能 2：啟動 LIFF 並確認使用者身分
-    liff.init({ liffId: myLiffId }).then(() => {
-        if (!liff.isLoggedIn()) {
-            // 沒登入 LINE 就強制叫他登入
-            liff.login();
+    // 🌟 功能 2：當家長選擇課程時，自動顯示下次上課時間
+    document.getElementById("course").addEventListener("change", function() {
+        const selectedCourse = this.value;
+        const hintSpan = document.getElementById("nextTimeHint");
+        if (selectedCourse && courseTimeMap[selectedCourse]) {
+            hintSpan.innerHTML = `💡 最近一次上課：${courseTimeMap[selectedCourse]}`;
         } else {
-            // 成功登入，抓取 LINE 帳號資料並顯示表單
-            liff.getProfile().then(profile => {
-                lineProfile = profile;
-                
-                // 觸發載入課程清單
-                loadCourses(); 
-                
-                // 隱藏 Loading，顯示表單
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('trialForm').style.display = 'block';
-            }).catch(err => console.error("獲取 Profile 失敗", err));
+            hintSpan.innerHTML = "";
         }
-    }).catch(err => {
-        console.error("LIFF 初始化失敗", err);
-        document.getElementById('loading').innerText = "系統連線異常，請確認是在 LINE 內部開啟。";
     });
 
-    // 🌟 功能 3：處理表單送出，寫入 Firebase
+    // 初始化 LIFF
+    liff.init({ liffId: myLiffId }).then(() => {
+        if (!liff.isLoggedIn()) { liff.login(); } 
+        else {
+            liff.getProfile().then(profile => {
+                lineProfile = profile;
+                loadCourses(); 
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('trialForm').style.display = 'block';
+            });
+        }
+    });
+
+    // 🌟 表單送出檢查與防呆
     document.getElementById("trialForm").addEventListener("submit", async (e) => {
         e.preventDefault();
+        
+        // 【防呆 1】防手抖冷卻機制 (防止 1 分鐘內重複送出)
+        const lastSubmit = localStorage.getItem("lastTrialSubmit");
+        if (lastSubmit && (Date.now() - parseInt(lastSubmit)) < 60000) {
+            Swal.fire({ icon: 'warning', title: '請勿重複送出', text: '您剛剛已經預約過了，請稍後再試。', confirmButtonColor: '#06C755' });
+            return;
+        }
+
+        // 【防呆 2】電話五選一必填
+        const pStu = document.getElementById("phone_student").value.trim();
+        const pHome = document.getElementById("phone_home").value.trim();
+        const pDad = document.getElementById("phone_dad").value.trim();
+        const pMom = document.getElementById("phone_mom").value.trim();
+        const pOther = document.getElementById("phone_other").value.trim();
+
+        if (!pStu && !pHome && !pDad && !pMom && !pOther) {
+            Swal.fire({ icon: 'error', title: '資料不完整', text: '請至少留下一個可以聯絡到您的電話或方式！', confirmButtonColor: '#06C755' });
+            return;
+        }
+
         const submitBtn = document.getElementById("submitBtn");
         submitBtn.disabled = true;
         submitBtn.innerText = "資料傳送中...";
 
-        // 整理要倒進系統暫存區的資料
+        // 整理對齊 ERP 的 Payload
+        const mainPhone = pStu || pDad || pMom || pHome; // 找一個當作主要代表號
         const payload = {
             name: document.getElementById("name").value,
             course: document.getElementById("course").value,
             trial_date: document.getElementById("trial_date").value,
-            phone: document.getElementById("phone").value,
-            status: "pending",  // 讓後台判定為「待處理」的關鍵
+            student_phone: pStu,
+            home_phone: pHome,
+            father: pDad,
+            mother: pMom,
+            phone: mainPhone, 
+            note: pOther ? `其他聯絡:${pOther}` : "",
+            status: "pending", 
             created_at: new Date().toISOString(),
             line_user_id: lineProfile ? lineProfile.userId : "未知",
             line_display_name: lineProfile ? lineProfile.displayName : "未知"
         };
 
         try {
-            // 直接寫入 trial_students 集合
             await db.collection("trial_students").add(payload);
             
-            alert("🎉 預約成功！我們將盡快與您聯繫。");
-            liff.closeWindow(); // 成功後自動關閉 LINE 視窗
+            localStorage.setItem("lastTrialSubmit", Date.now().toString()); // 紀錄送出時間防連點
+            
+            // 🌟 超美客製化成功訊息
+            Swal.fire({
+                icon: 'success',
+                title: '預約成功！',
+                html: `感謝您預約 <b>${payload.course}</b><br>鳩特老師會盡快與您聯繫確認細節！`,
+                confirmButtonText: '關閉視窗',
+                confirmButtonColor: '#06C755',
+                allowOutsideClick: false
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    liff.closeWindow(); // 家長點擊關閉後，自動把 LINE 視窗收掉
+                }
+            });
             
         } catch (error) {
             console.error("寫入 Firebase 失敗: ", error);
-            alert("預約失敗，請稍後再試或直接聯絡客服。");
+            Swal.fire({ icon: 'error', title: '系統異常', text: '預約失敗，請稍後再試或直接聯絡客服。', confirmButtonColor: '#06C755' });
             submitBtn.disabled = false;
-            submitBtn.innerText = "送出預約";
+            submitBtn.innerText = "確認送出";
         }
     });
 </script>
 </body>
+</html>
 </html>
