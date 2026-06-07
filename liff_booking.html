@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鳩特數理 - 預約試聽</title>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    
+    <style>
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
+        .container { max-width: 400px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #333; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; color: #666; font-weight: bold; }
+        input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; font-size: 16px; }
+        button { width: 100%; padding: 12px; background-color: #06C755; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; font-weight: bold; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        #loading { text-align: center; color: #06C755; margin-bottom: 15px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>預約試聽</h2>
+    
+    <div id="loading">系統連線中... 請稍候</div>
+    
+    <form id="trialForm" style="display: none;">
+        <div class="form-group">
+            <label for="name">學生姓名</label>
+            <input type="text" id="name" required placeholder="請輸入學生姓名">
+        </div>
+        <div class="form-group">
+            <label for="course">想試聽的課程</label>
+            <select id="course" required disabled>
+                <option value="">⏳ 課程載入中...</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="trial_date">預計試聽日期</label>
+            <input type="date" id="trial_date" required>
+        </div>
+        <div class="form-group">
+            <label for="phone">聯絡電話</label>
+            <input type="tel" id="phone" required placeholder="0912345678">
+        </div>
+        <button type="submit" id="submitBtn">送出預約</button>
+    </form>
+</div>
+
+<script>
+    // ==========================================
+    // 🔴 替換區 1：填入你的 Firebase 金鑰
+    // ==========================================
+    const firebaseConfig = {
+        apiKey: "AIzaSyADP9HfxjVQOAD0zxGtWvMk_nRposqyqSY",
+        authDomain: "shiftar-jutor.firebaseapp.com",
+        projectId: "shiftar-jutor"
+    };
+    
+    // 初始化 Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    // ==========================================
+    // 🔴 替換區 2：填入你在 LINE 後台拿到的 LIFF ID
+    // ==========================================
+    const myLiffId = "🔴填入你的_LIFF_ID"; 
+    
+    let lineProfile = null; 
+
+    // 🌟 功能 1：去資料庫動態撈取課程清單
+    async function loadCourses() {
+        const courseSelect = document.getElementById("course");
+        try {
+            const docRef = await db.collection("settings").doc("courses").get();
+            if (docRef.exists) {
+                const courseList = docRef.data().list || [];
+                courseSelect.innerHTML = '<option value="">請選擇...</option>';
+                courseList.forEach(courseName => {
+                    const option = document.createElement("option");
+                    option.value = courseName;
+                    option.textContent = courseName;
+                    courseSelect.appendChild(option);
+                });
+                courseSelect.disabled = false; // 解鎖下拉選單
+            } else {
+                courseSelect.innerHTML = '<option value="">(目前無開放課程)</option>';
+            }
+        } catch (error) {
+            console.error("無法載入課程清單:", error);
+            courseSelect.innerHTML = '<option value="">載入失敗，請重整網頁</option>';
+        }
+    }
+
+    // 🌟 功能 2：啟動 LIFF 並確認使用者身分
+    liff.init({ liffId: myLiffId }).then(() => {
+        if (!liff.isLoggedIn()) {
+            // 沒登入 LINE 就強制叫他登入
+            liff.login();
+        } else {
+            // 成功登入，抓取 LINE 帳號資料並顯示表單
+            liff.getProfile().then(profile => {
+                lineProfile = profile;
+                
+                // 觸發載入課程清單
+                loadCourses(); 
+                
+                // 隱藏 Loading，顯示表單
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('trialForm').style.display = 'block';
+            }).catch(err => console.error("獲取 Profile 失敗", err));
+        }
+    }).catch(err => {
+        console.error("LIFF 初始化失敗", err);
+        document.getElementById('loading').innerText = "系統連線異常，請確認是在 LINE 內部開啟。";
+    });
+
+    // 🌟 功能 3：處理表單送出，寫入 Firebase
+    document.getElementById("trialForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const submitBtn = document.getElementById("submitBtn");
+        submitBtn.disabled = true;
+        submitBtn.innerText = "資料傳送中...";
+
+        // 整理要倒進系統暫存區的資料
+        const payload = {
+            name: document.getElementById("name").value,
+            course: document.getElementById("course").value,
+            trial_date: document.getElementById("trial_date").value,
+            phone: document.getElementById("phone").value,
+            status: "pending",  // 讓後台判定為「待處理」的關鍵
+            created_at: new Date().toISOString(),
+            line_user_id: lineProfile ? lineProfile.userId : "未知",
+            line_display_name: lineProfile ? lineProfile.displayName : "未知"
+        };
+
+        try {
+            // 直接寫入 trial_students 集合
+            await db.collection("trial_students").add(payload);
+            
+            alert("🎉 預約成功！我們將盡快與您聯繫。");
+            liff.closeWindow(); // 成功後自動關閉 LINE 視窗
+            
+        } catch (error) {
+            console.error("寫入 Firebase 失敗: ", error);
+            alert("預約失敗，請稍後再試或直接聯絡客服。");
+            submitBtn.disabled = false;
+            submitBtn.innerText = "送出預約";
+        }
+    });
+</script>
+</body>
+</html>
