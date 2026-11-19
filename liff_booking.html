@@ -11,7 +11,7 @@
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <!-- 🌟 引入 SweetAlert2 (超美彈窗套件) -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    
+
     <style>
         body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
         .container { max-width: 450px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
@@ -20,13 +20,16 @@
         .form-row { display: flex; gap: 10px; margin-bottom: 15px; }
         .form-row .form-group { flex: 1; margin-bottom: 0; }
         label { display: block; margin-bottom: 5px; color: #555; font-weight: bold; font-size: 14px; }
-        input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 15px; }
+        input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 15px; background: white; }
+        select:disabled { background: #f4f5f7; color: #999; }
+        option.divider { color: #999; }
         input:focus, select:focus { border-color: #06C755; outline: none; box-shadow: 0 0 5px rgba(6,199,85,0.3); }
         button { width: 100%; padding: 14px; background-color: #06C755; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold; transition: 0.3s; }
         button:disabled { background-color: #ccc; cursor: not-allowed; }
         #loading { text-align: center; color: #06C755; margin-bottom: 15px; font-weight: bold; }
+        .hint { display: block; margin-top: 5px; font-size: 13px; color: #666; }
         /* 🌟 下次上課時間的提示文字樣式 */
-        #nextTimeHint { display: block; margin-top: 5px; font-size: 13px; color: #E50914; font-weight: bold; }
+        #nextTimeHint { color: #E50914; font-weight: bold; }
         .section-title { border-bottom: 2px solid #06C755; padding-bottom: 5px; margin-top: 25px; margin-bottom: 15px; color: #333; font-size: 16px; font-weight: bold;}
     </style>
 </head>
@@ -35,30 +38,52 @@
 <div class="container">
     <h2>預約試聽</h2>
     <div id="loading">系統連線中... 請稍候</div>
-    
+
     <form id="trialForm" style="display: none;">
         <div class="section-title">👤 基本資料</div>
-        <div class="form-group">
-            <label for="name">學生姓名 <span style="color:red">*</span></label>
-            <input type="text" id="name" required placeholder="請輸入真實姓名">
+        <div class="form-row">
+            <div class="form-group" style="flex: 3;">
+                <label for="name">學生姓名 <span style="color:red">*</span></label>
+                <input type="text" id="name" required placeholder="請輸入真實姓名">
+            </div>
+            <div class="form-group" style="flex: 2;">
+                <label for="grade">目前年級 <span style="color:red">*</span></label>
+                <select id="grade" required>
+                    <option value="">請選擇...</option>
+                    <option value="小五">小五</option>
+                    <option value="小六">小六</option>
+                    <option value="國一">國一</option>
+                    <option value="國二">國二</option>
+                    <option value="國三">國三</option>
+                    <option value="高一">高一</option>
+                    <option value="高二">高二</option>
+                    <option value="高三">高三</option>
+                </select>
+            </div>
         </div>
-        
+
         <div class="form-group">
             <label for="course">想試聽的課程 <span style="color:red">*</span></label>
             <select id="course" required disabled>
                 <option value="">⏳ 課程載入中...</option>
             </select>
+            <span id="courseHint" class="hint"></span>
             <!-- 🌟 動態顯示下次試聽時間 -->
-            <span id="nextTimeHint"></span>
+            <span id="nextTimeHint" class="hint"></span>
         </div>
 
         <div class="form-group">
-            <label for="trial_date">希望試聽日期 <span style="color:red">*</span></label>
-            <input type="date" id="trial_date" required>
+            <label for="trial_session">希望試聽日期 <span style="color:red">*</span></label>
+            <select id="trial_session" required disabled>
+                <option value="">請先選擇課程</option>
+            </select>
+            <!-- 舊版課程資料沒有上課場次時，改用日期選擇 -->
+            <input type="date" id="trial_date" style="display: none;">
+            <span id="sessionHint" class="hint"></span>
         </div>
 
         <div class="section-title">📞 聯絡方式 (請至少填寫一項)</div>
-        
+
         <div class="form-row">
             <div class="form-group">
                 <label for="phone_student">學生手機</label>
@@ -69,7 +94,7 @@
                 <input type="tel" id="phone_home" class="phone-input" placeholder="03...">
             </div>
         </div>
-        
+
         <div class="form-row">
             <div class="form-group">
                 <label for="phone_dad">父親手機</label>
@@ -101,65 +126,240 @@
     const db = firebase.firestore();
 
     // 🔴 替換區：你的 LIFF ID
-    const myLiffId = "2010319288-H6zr1ioX"; 
-    
-    let lineProfile = null; 
-    let courseTimeMap = {}; // 用來存「課程: 下次時間」的對照表
+    const myLiffId = "2010319288-H6zr1ioX";
 
-    // 🌟 功能 1：去資料庫撈取你剛剛在 ERP 按下同步的乾淨課程表
+    let lineProfile = null;
+    let allCourses = [];      // [{label, course, next_time, grade, is_promotion}]
+    let courseByValue = {};   // 實際班級名稱 → 課程資料
+    let sessionMode = false;  // ERP 有提供上課場次時，試聽日改成選場次
+
+    const GRADE_PATTERN = "(小[一二三四五六]|國[一二三]|高[一二三])";
+    const GRADE_ORDER = { 小一: 10, 小二: 20, 小三: 30, 小四: 40, 小五: 50, 小六: 60, 國一: 70, 國二: 80, 國三: 90, 高一: 100, 高二: 110, 高三: 120 };
+    const NEXT_GRADE = { 小五: "小六", 小六: "國一", 國一: "國二", 國二: "國三", 國三: "高一", 高一: "高二", 高二: "高三" };
+    const SUBJECT_ORDER = ["數學", "國文", "英文", "自然", "理化", "物理", "化學", "生物", "地科"];
+
+    // 家長看到的課名（與 ERP public_course_label 相同）：去掉季別與堂數，例如「高二數學_26Q4 (12堂)」→「高二數學」
+    function stripTermSuffix(name) {
+        return String(name || "")
+            .replace(/_[^\s()\[\]]+/g, "")
+            .replace(/\s*[(（]\s*\d+\s*堂[^)）]*[)）]/g, "")
+            .replace(/\s{2,}/g, " ")
+            .trim();
+    }
+
+    function gradeInfo(label) {
+        const promotion = label.match(new RegExp("升\\s*" + GRADE_PATTERN));
+        if (promotion) return { grade: promotion[1], is_promotion: true };
+        const match = label.match(new RegExp(GRADE_PATTERN));
+        return { grade: match ? match[1] : "", is_promotion: false };
+    }
+
+    function escapeHtml(text) {
+        return String(text).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+
+    // 台灣時間 (UTC+8)，避免凌晨報名被記成前一天
+    function taipeiIso(date) {
+        return new Date(date.getTime() + 8 * 3600 * 1000).toISOString().replace("Z", "+08:00");
+    }
+
+    // 「2026-11-23T19:00」→「11月23日（週一）19:00」；只有日期時不帶時間
+    function arrivalText(dateText, timeText) {
+        const [y, m, d] = String(dateText).slice(0, 10).split("-").map(Number);
+        if (!y || !m || !d) return "";
+        const weekday = "日一二三四五六"[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+        return `${m}月${d}日（週${weekday}）${timeText ? " " + timeText : ""}`;
+    }
+
+    function courseSortKey(c) {
+        const subjectIndex = SUBJECT_ORDER.findIndex(s => c.label.includes(s));
+        return [GRADE_ORDER[c.grade] || 999, subjectIndex === -1 ? 99 : subjectIndex, c.label];
+    }
+
+    function compareCourses(a, b) {
+        const ka = courseSortKey(a), kb = courseSortKey(b);
+        for (let i = 0; i < ka.length; i++) {
+            if (ka[i] < kb[i]) return -1;
+            if (ka[i] > kb[i]) return 1;
+        }
+        return 0;
+    }
+
+    // 年級推薦：同年級的常態課；小六等升學階段則推薦「升國一」這類銜接課
+    function isRecommended(course, studentGrade) {
+        if (!studentGrade || !course.grade) return false;
+        if (course.is_promotion) return course.grade === NEXT_GRADE[studentGrade];
+        return course.grade === studentGrade;
+    }
+
+    // 🌟 功能 1：去資料庫撈取 ERP 同步的課程表
     async function loadCourses() {
         const courseSelect = document.getElementById("course");
         try {
             const docRef = await db.collection("settings").doc("public_courses").get();
-            if (docRef.exists) {
-                courseTimeMap = docRef.data().courses || {};
-                const courseNames = Object.keys(courseTimeMap).sort(); // 字母排序
-                
-                courseSelect.innerHTML = '<option value="">請選擇...</option>';
-                courseNames.forEach(cName => {
-                    const option = document.createElement("option");
-                    option.value = cName;
-                    option.textContent = cName;
-                    courseSelect.appendChild(option);
-                });
-                courseSelect.disabled = false;
+            const data = docRef.exists ? docRef.data() : {};
+            let rows = [];
+            const nowLocal = taipeiIso(new Date()).slice(0, 16);  // 「YYYY-MM-DDTHH:MM」台灣時間
+            const list = Array.isArray(data.course_list) ? data.course_list : [];
+            sessionMode = list.length > 0 && list.every(item => Array.isArray(item.sessions));
+            if (list.length) {
+                // 新格式：顯示名稱 + 實際班級名稱（+ 未來上課場次）
+                rows = list.map(item => {
+                    const label = stripTermSuffix(item.label || item.course);
+                    const info = item.grade !== undefined ? { grade: item.grade || "", is_promotion: !!item.is_promotion } : gradeInfo(label);
+                    // 同步後已經過去的場次在這裡濾掉，不用等下一次同步
+                    const sessions = (item.sessions || [])
+                        .filter(x => x && x.start && String(x.start).slice(0, 16) > nowLocal)
+                        .map(x => ({ course: String(x.course || item.course || label), start: String(x.start).slice(0, 16), end: String(x.end || "").slice(0, 16), text: x.text || "" }));
+                    const nextTime = sessionMode ? (sessions[0] ? sessions[0].text : "") : (item.next_time || "");
+                    return { label, course: String(item.course || label), next_time: nextTime, sessions, ...info };
+                }).filter(c => !sessionMode || c.sessions.length);  // 沒有未來場次的課程不顯示
             } else {
-                courseSelect.innerHTML = '<option value="">(目前無開放課程)</option>';
+                // 舊格式相容：{ 課程名稱: 下次時間 }
+                rows = Object.entries(data.courses || {}).map(([name, nextTime]) => {
+                    const label = stripTermSuffix(name);
+                    return { label, course: name, next_time: nextTime || "", sessions: [], ...gradeInfo(label) };
+                });
             }
+            document.getElementById("trial_session").style.display = sessionMode ? "" : "none";
+            document.getElementById("trial_session").required = sessionMode;
+            document.getElementById("trial_date").style.display = sessionMode ? "none" : "";
+            document.getElementById("trial_date").required = !sessionMode;
+
+            const seenLabels = new Set();
+            allCourses = rows.filter(c => {
+                if (!c.label || seenLabels.has(c.label)) return false;
+                seenLabels.add(c.label);
+                return true;
+            }).sort(compareCourses);
+            courseByValue = {};
+            allCourses.forEach(c => { courseByValue[c.course] = c; });
+
+            renderCourseOptions();
         } catch (error) {
             console.error("無法載入課程:", error);
-            courseSelect.innerHTML = '<option value="">載入失敗</option>';
+            courseSelect.innerHTML = '<option value="">載入失敗，請重新開啟</option>';
         }
     }
 
-    // 🌟 功能 2：當家長選擇課程時，自動顯示下次上課時間
-    document.getElementById("course").addEventListener("change", function() {
-        const selectedCourse = this.value;
-        const hintSpan = document.getElementById("nextTimeHint");
-        if (selectedCourse && courseTimeMap[selectedCourse]) {
-            hintSpan.innerHTML = `💡 最近一次上課：${courseTimeMap[selectedCourse]}`;
-        } else {
-            hintSpan.innerHTML = "";
+    // 🌟 功能 2：依年級把推薦課程排在最前面
+    function renderCourseOptions() {
+        const courseSelect = document.getElementById("course");
+        const courseHint = document.getElementById("courseHint");
+        const studentGrade = document.getElementById("grade").value;
+        const previous = courseSelect.value;
+
+        courseSelect.innerHTML = "";
+        if (!allCourses.length) {
+            courseSelect.innerHTML = '<option value="">(目前無開放課程)</option>';
+            courseSelect.disabled = true;
+            courseHint.textContent = "";
+            updateNextTimeHint();
+            return;
         }
-    });
+        if (!studentGrade) {
+            courseSelect.innerHTML = '<option value="">請先選擇年級</option>';
+            courseSelect.disabled = true;
+            courseHint.textContent = "";
+            updateNextTimeHint();
+            return;
+        }
+
+        const recommended = allCourses.filter(c => isRecommended(c, studentGrade));
+        const others = allCourses.filter(c => !isRecommended(c, studentGrade));
+
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "請選擇...";
+        courseSelect.appendChild(placeholder);
+
+        const appendCourses = items => items.forEach(c => {
+            const option = document.createElement("option");
+            option.value = c.course;
+            option.textContent = c.label;
+            courseSelect.appendChild(option);
+        });
+        // 同年級課程放最上方 → 分隔線 → 其他年級依年級順序排列
+        appendCourses(recommended);
+        if (recommended.length && others.length) {
+            const divider = document.createElement("option");
+            divider.disabled = true;
+            divider.value = "";
+            divider.className = "divider";
+            divider.textContent = "──── 以下為其他年級課程 ────";
+            courseSelect.appendChild(divider);
+        }
+        appendCourses(others);
+
+        courseHint.textContent = recommended.length
+            ? `已將適合${studentGrade}的課程排在最前面`
+            : `目前沒有${studentGrade}專屬課程，可從所有課程中選擇`;
+
+        // 年級改了：保留仍存在的選擇，否則只有一門推薦課時自動帶入
+        if (previous && courseByValue[previous]) {
+            courseSelect.value = previous;
+        } else if (recommended.length === 1) {
+            courseSelect.value = recommended[0].course;
+        }
+        courseSelect.disabled = false;
+        updateNextTimeHint();
+    }
+
+    // 🌟 功能 3：選好課程後，列出可以試聽的上課場次（舊格式則顯示下次上課時間）
+    function updateNextTimeHint() {
+        const selected = courseByValue[document.getElementById("course").value];
+        const hintSpan = document.getElementById("nextTimeHint");
+        const sessionSelect = document.getElementById("trial_session");
+        const sessionHint = document.getElementById("sessionHint");
+        if (!sessionMode) {
+            hintSpan.textContent = selected && selected.next_time ? `💡 最近一次上課：${selected.next_time}` : "";
+            return;
+        }
+        hintSpan.textContent = "";
+        sessionSelect.innerHTML = "";
+        if (!selected) {
+            sessionSelect.innerHTML = '<option value="">請先選擇課程</option>';
+            sessionSelect.disabled = true;
+            sessionHint.textContent = "";
+            return;
+        }
+        selected.sessions.forEach((x, index) => {
+            const option = document.createElement("option");
+            option.value = String(index);
+            option.textContent = x.text;
+            sessionSelect.appendChild(option);
+        });
+        sessionSelect.value = "0";  // 預設最近一次上課
+        sessionSelect.disabled = false;
+        sessionHint.textContent = "預設為最近一次上課，可改選其他日期";
+    }
+
+    document.getElementById("grade").addEventListener("change", renderCourseOptions);
+    document.getElementById("course").addEventListener("change", updateNextTimeHint);
+
+    // 試聽日期不能選過去的日子（舊格式日期選擇）
+    document.getElementById("trial_date").min = taipeiIso(new Date()).slice(0, 10);
 
     // 初始化 LIFF
     liff.init({ liffId: myLiffId }).then(() => {
-        if (!liff.isLoggedIn()) { liff.login(); } 
+        if (!liff.isLoggedIn()) { liff.login(); }
         else {
             liff.getProfile().then(profile => {
                 lineProfile = profile;
-                loadCourses(); 
+                loadCourses();
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('trialForm').style.display = 'block';
             });
         }
+    }).catch(error => {
+        console.error("LIFF 初始化失敗:", error);
+        document.getElementById('loading').textContent = "連線失敗，請從 LINE 重新開啟此頁面";
     });
 
     // 🌟 表單送出檢查與防呆
     document.getElementById("trialForm").addEventListener("submit", async (e) => {
         e.preventDefault();
-        
+
         // 【防呆 1】防手抖冷卻機制 (防止 1 分鐘內重複送出)
         const lastSubmit = localStorage.getItem("lastTrialSubmit");
         if (lastSubmit && (Date.now() - parseInt(lastSubmit)) < 60000) {
@@ -179,38 +379,64 @@
             return;
         }
 
+        const selectedCourse = courseByValue[document.getElementById("course").value];
+        if (!selectedCourse) {
+            Swal.fire({ icon: 'error', title: '資料不完整', text: '請選擇想試聽的課程。', confirmButtonColor: '#06C755' });
+            return;
+        }
+        let trial;
+        if (sessionMode) {
+            const session = selectedCourse.sessions[Number(document.getElementById("trial_session").value)];
+            if (!session) {
+                Swal.fire({ icon: 'error', title: '資料不完整', text: '請選擇試聽日期。', confirmButtonColor: '#06C755' });
+                return;
+            }
+            trial = { course: session.course, trial_date: session.start.slice(0, 10), trial_time: session.start.slice(11, 16), trial_start: session.start, trial_end: session.end };
+        } else {
+            trial = { course: selectedCourse.course, trial_date: document.getElementById("trial_date").value, trial_time: "", trial_start: "", trial_end: "" };
+        }
+
         const submitBtn = document.getElementById("submitBtn");
         submitBtn.disabled = true;
         submitBtn.innerText = "資料傳送中...";
 
         // 整理對齊 ERP 的 Payload
+        const nowIso = taipeiIso(new Date());
         const mainPhone = pStu || pDad || pMom || pHome; // 找一個當作主要代表號
         const payload = {
-            name: document.getElementById("name").value,
-            course: document.getElementById("course").value,
-            trial_date: document.getElementById("trial_date").value,
+            name: document.getElementById("name").value.trim(),
+            grade: document.getElementById("grade").value,
+            course: trial.course,                   // 實際班級名稱（含季別），ERP 入班用
+            course_label: selectedCourse.label,     // 家長看到的名稱
+            trial_date: trial.trial_date,
+            trial_time: trial.trial_time,
+            trial_start: trial.trial_start,
+            trial_end: trial.trial_end,
+            trial_date_status: "scheduled",
+            registration_date: nowIso.slice(0, 10),
             student_phone: pStu,
             home_phone: pHome,
             father: pDad,
             mother: pMom,
-            phone: mainPhone, 
+            phone: mainPhone,
             note: pOther ? `其他聯絡:${pOther}` : "",
-            status: "pending", 
-            created_at: new Date().toISOString(),
+            status: "pending",
+            source: "liff",
+            created_at: nowIso,
             line_user_id: lineProfile ? lineProfile.userId : "未知",
             line_display_name: lineProfile ? lineProfile.displayName : "未知"
         };
 
         try {
             await db.collection("trial_students").add(payload);
-            
+
             localStorage.setItem("lastTrialSubmit", Date.now().toString()); // 紀錄送出時間防連點
-            
+
             // 🌟 超美客製化成功訊息
             Swal.fire({
                 icon: 'success',
                 title: '預約成功！',
-                html: `感謝您預約 <b>${payload.course}</b><br>鳩特老師會盡快與您聯繫確認細節！`,
+                html: `麻煩在 <b>${escapeHtml(arrivalText(trial.trial_date, trial.trial_time))}</b><br>到班參加試聽<br><span style="font-size:14px;color:#666">課程：${escapeHtml(selectedCourse.label)}</span>`,
                 confirmButtonText: '關閉視窗',
                 confirmButtonColor: '#06C755',
                 allowOutsideClick: false
@@ -219,7 +445,7 @@
                     liff.closeWindow(); // 家長點擊關閉後，自動把 LINE 視窗收掉
                 }
             });
-            
+
         } catch (error) {
             console.error("寫入 Firebase 失敗: ", error);
             Swal.fire({ icon: 'error', title: '系統異常', text: '預約失敗，請稍後再試或直接聯絡客服。', confirmButtonColor: '#06C755' });
@@ -229,5 +455,4 @@
     });
 </script>
 </body>
-</html>
 </html>
