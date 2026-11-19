@@ -138,9 +138,13 @@
     const NEXT_GRADE = { 小五: "小六", 小六: "國一", 國一: "國二", 國二: "國三", 國三: "高一", 高一: "高二", 高二: "高三" };
     const SUBJECT_ORDER = ["數學", "國文", "英文", "自然", "理化", "物理", "化學", "生物", "地科"];
 
-    // 與 ERP 相同規則：只切掉底線後的季別字串，例如「高二數學_26Q4 (12堂)」→「高二數學 (12堂)」
+    // 家長看到的課名（與 ERP public_course_label 相同）：去掉季別與堂數，例如「高二數學_26Q4 (12堂)」→「高二數學」
     function stripTermSuffix(name) {
-        return String(name || "").replace(/_[^\s()\[\]]+/g, "").trim();
+        return String(name || "")
+            .replace(/_[^\s()\[\]]+/g, "")
+            .replace(/\s*[(（]\s*\d+\s*堂[^)）]*[)）]/g, "")
+            .replace(/\s{2,}/g, " ")
+            .trim();
     }
 
     function gradeInfo(label) {
