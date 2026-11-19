@@ -29,7 +29,12 @@
         #loading { text-align: center; color: #06C755; margin-bottom: 15px; font-weight: bold; }
         .hint { display: block; margin-top: 5px; font-size: 13px; color: #666; }
         /* 🌟 下次上課時間的提示文字樣式 */
-        #nextTimeHint { color: #E50914; font-weight: bold; }
+        /* 🌟 最近三次上課：直接點選，不需要選年份 */
+        .session-list { display: flex; flex-direction: column; gap: 8px; }
+        .session-option { display: flex; align-items: center; gap: 10px; margin: 0; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; font-weight: normal; color: #333; cursor: pointer; }
+        .session-option input { width: auto; margin: 0; accent-color: #06C755; }
+        .session-option.selected { border-color: #06C755; background: #effbf3; font-weight: bold; }
+        .session-empty { padding: 12px; border: 1px dashed #ddd; border-radius: 8px; color: #999; font-size: 14px; }
         .section-title { border-bottom: 2px solid #06C755; padding-bottom: 5px; margin-top: 25px; margin-bottom: 15px; color: #333; font-size: 16px; font-weight: bold;}
     </style>
 </head>
@@ -68,17 +73,14 @@
                 <option value="">⏳ 課程載入中...</option>
             </select>
             <span id="courseHint" class="hint"></span>
-            <!-- 🌟 動態顯示下次試聽時間 -->
-            <span id="nextTimeHint" class="hint"></span>
         </div>
 
         <div class="form-group">
-            <label for="trial_session">希望試聽日期 <span style="color:red">*</span></label>
-            <select id="trial_session" required disabled>
-                <option value="">請先選擇課程</option>
-            </select>
-            <!-- 舊版課程資料沒有上課場次時，改用日期選擇 -->
-            <input type="date" id="trial_date" style="display: none;">
+            <label>希望試聽日期 <span style="color:red">*</span></label>
+            <!-- 列出最近三次上課，點一個就好 -->
+            <div id="sessionList" class="session-list" role="radiogroup">
+                <div class="session-empty">請先選擇課程</div>
+            </div>
             <span id="sessionHint" class="hint"></span>
         </div>
 
@@ -129,9 +131,9 @@
     const myLiffId = "2010319288-H6zr1ioX";
 
     let lineProfile = null;
-    let allCourses = [];      // [{label, course, next_time, grade, is_promotion}]
+    let allCourses = [];      // [{label, course, sessions, grade, is_promotion}]
     let courseByValue = {};   // 實際班級名稱 → 課程資料
-    let sessionMode = false;  // ERP 有提供上課場次時，試聽日改成選場次
+    const MAX_SHOWN_SESSIONS = 3;  // 家長看到最近三次上課
 
     const GRADE_PATTERN = "(小[一二三四五六]|國[一二三]|高[一二三])";
     const GRADE_ORDER = { 小一: 10, 小二: 20, 小三: 30, 小四: 40, 小五: 50, 小六: 60, 國一: 70, 國二: 80, 國三: 90, 高一: 100, 高二: 110, 高三: 120 };
@@ -161,6 +163,25 @@
     // 台灣時間 (UTC+8)，避免凌晨報名被記成前一天
     function taipeiIso(date) {
         return new Date(date.getTime() + 8 * 3600 * 1000).toISOString().replace("Z", "+08:00");
+    }
+
+    // 「2026-11-26T10:00」+「12:00」→「11/26（週四）10:00~12:00」（不顯示年份）
+    function sessionLabel(start, end) {
+        const [y, m, d] = start.slice(0, 10).split("-").map(Number);
+        const weekday = "日一二三四五六"[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+        return `${m}/${d}（週${weekday}）${start.slice(11, 16)}${end ? "~" + end.slice(11, 16) : ""}`;
+    }
+
+    // 舊格式只有「11/24 (週二) 19:00~21:30」：補上年份轉成一個場次（跨年時算明年）
+    function sessionFromNextTime(text, course, nowLocal) {
+        const m = String(text || "").match(/(\d{1,2})\/(\d{1,2}).*?(\d{1,2}):(\d{2})\s*[~～-]\s*(\d{1,2}):(\d{2})/);
+        if (!m) return null;
+        const p2 = n => String(n).padStart(2, "0");
+        let year = Number(nowLocal.slice(0, 4));
+        const date = `${p2(m[1])}-${p2(m[2])}`;
+        if (`${year}-${date}` < nowLocal.slice(0, 10) && Number(m[1]) < Number(nowLocal.slice(5, 7))) year += 1;
+        const day = `${year}-${date}`;
+        return { course, start: `${day}T${p2(m[3])}:${m[4]}`, end: `${day}T${p2(m[5])}:${m[6]}` };
     }
 
     // 「2026-11-23T19:00」→「11月23日（週一）19:00」；只有日期時不帶時間
@@ -201,30 +222,28 @@
             let rows = [];
             const nowLocal = taipeiIso(new Date()).slice(0, 16);  // 「YYYY-MM-DDTHH:MM」台灣時間
             const list = Array.isArray(data.course_list) ? data.course_list : [];
-            sessionMode = list.length > 0 && list.every(item => Array.isArray(item.sessions));
+            const isFuture = x => x && x.start && String(x.start).slice(0, 16) > nowLocal;
             if (list.length) {
-                // 新格式：顯示名稱 + 實際班級名稱（+ 未來上課場次）
+                // 新格式：顯示名稱 + 實際班級名稱 + 未來上課場次
                 rows = list.map(item => {
                     const label = stripTermSuffix(item.label || item.course);
                     const info = item.grade !== undefined ? { grade: item.grade || "", is_promotion: !!item.is_promotion } : gradeInfo(label);
+                    const course = String(item.course || label);
+                    let sessions = Array.isArray(item.sessions)
+                        ? item.sessions.map(x => ({ course: String(x.course || course), start: String(x.start || "").slice(0, 16), end: String(x.end || "").slice(0, 16) }))
+                        : [sessionFromNextTime(item.next_time, course, nowLocal)];
                     // 同步後已經過去的場次在這裡濾掉，不用等下一次同步
-                    const sessions = (item.sessions || [])
-                        .filter(x => x && x.start && String(x.start).slice(0, 16) > nowLocal)
-                        .map(x => ({ course: String(x.course || item.course || label), start: String(x.start).slice(0, 16), end: String(x.end || "").slice(0, 16), text: x.text || "" }));
-                    const nextTime = sessionMode ? (sessions[0] ? sessions[0].text : "") : (item.next_time || "");
-                    return { label, course: String(item.course || label), next_time: nextTime, sessions, ...info };
-                }).filter(c => !sessionMode || c.sessions.length);  // 沒有未來場次的課程不顯示
+                    sessions = sessions.filter(isFuture);
+                    return { label, course, sessions, ...info };
+                });
             } else {
                 // 舊格式相容：{ 課程名稱: 下次時間 }
                 rows = Object.entries(data.courses || {}).map(([name, nextTime]) => {
                     const label = stripTermSuffix(name);
-                    return { label, course: name, next_time: nextTime || "", sessions: [], ...gradeInfo(label) };
+                    return { label, course: name, sessions: [sessionFromNextTime(nextTime, name, nowLocal)].filter(isFuture), ...gradeInfo(label) };
                 });
             }
-            document.getElementById("trial_session").style.display = sessionMode ? "" : "none";
-            document.getElementById("trial_session").required = sessionMode;
-            document.getElementById("trial_date").style.display = sessionMode ? "none" : "";
-            document.getElementById("trial_date").required = !sessionMode;
+            rows = rows.filter(c => c.sessions.length);  // 沒有未來上課日的課程不顯示
 
             const seenLabels = new Set();
             allCourses = rows.filter(c => {
@@ -305,40 +324,41 @@
         updateNextTimeHint();
     }
 
-    // 🌟 功能 3：選好課程後，列出可以試聽的上課場次（舊格式則顯示下次上課時間）
+    // 🌟 功能 3：選好課程後，列出最近三次上課讓家長直接點選
     function updateNextTimeHint() {
         const selected = courseByValue[document.getElementById("course").value];
-        const hintSpan = document.getElementById("nextTimeHint");
-        const sessionSelect = document.getElementById("trial_session");
+        const list = document.getElementById("sessionList");
         const sessionHint = document.getElementById("sessionHint");
-        if (!sessionMode) {
-            hintSpan.textContent = selected && selected.next_time ? `💡 最近一次上課：${selected.next_time}` : "";
-            return;
-        }
-        hintSpan.textContent = "";
-        sessionSelect.innerHTML = "";
+        list.innerHTML = "";
         if (!selected) {
-            sessionSelect.innerHTML = '<option value="">請先選擇課程</option>';
-            sessionSelect.disabled = true;
+            list.innerHTML = '<div class="session-empty">請先選擇課程</div>';
             sessionHint.textContent = "";
             return;
         }
-        selected.sessions.forEach((x, index) => {
-            const option = document.createElement("option");
-            option.value = String(index);
-            option.textContent = x.text;
-            sessionSelect.appendChild(option);
+        const shown = selected.sessions.slice(0, MAX_SHOWN_SESSIONS);
+        shown.forEach((x, index) => {
+            const option = document.createElement("label");
+            option.className = "session-option" + (index === 0 ? " selected" : "");
+            const radio = document.createElement("input");
+            radio.type = "radio";
+            radio.name = "trial_session";
+            radio.value = String(index);
+            radio.checked = index === 0;  // 預設最近一次上課
+            radio.addEventListener("change", () => {
+                list.querySelectorAll(".session-option").forEach(el => el.classList.remove("selected"));
+                option.classList.add("selected");
+            });
+            option.appendChild(radio);
+            option.appendChild(document.createTextNode(sessionLabel(x.start, x.end)));
+            list.appendChild(option);
         });
-        sessionSelect.value = "0";  // 預設最近一次上課
-        sessionSelect.disabled = false;
-        sessionHint.textContent = "預設為最近一次上課，可改選其他日期";
+        sessionHint.textContent = shown.length > 1
+            ? `以下是最近 ${shown.length} 次上課，請點選想試聽的日期`
+            : "目前只有這一次上課可以預約試聽";
     }
 
     document.getElementById("grade").addEventListener("change", renderCourseOptions);
     document.getElementById("course").addEventListener("change", updateNextTimeHint);
-
-    // 試聽日期不能選過去的日子（舊格式日期選擇）
-    document.getElementById("trial_date").min = taipeiIso(new Date()).slice(0, 10);
 
     // 初始化 LIFF
     liff.init({ liffId: myLiffId }).then(() => {
@@ -384,17 +404,13 @@
             Swal.fire({ icon: 'error', title: '資料不完整', text: '請選擇想試聽的課程。', confirmButtonColor: '#06C755' });
             return;
         }
-        let trial;
-        if (sessionMode) {
-            const session = selectedCourse.sessions[Number(document.getElementById("trial_session").value)];
-            if (!session) {
-                Swal.fire({ icon: 'error', title: '資料不完整', text: '請選擇試聽日期。', confirmButtonColor: '#06C755' });
-                return;
-            }
-            trial = { course: session.course, trial_date: session.start.slice(0, 10), trial_time: session.start.slice(11, 16), trial_start: session.start, trial_end: session.end };
-        } else {
-            trial = { course: selectedCourse.course, trial_date: document.getElementById("trial_date").value, trial_time: "", trial_start: "", trial_end: "" };
+        const checked = document.querySelector('input[name="trial_session"]:checked');
+        const session = checked ? selectedCourse.sessions[Number(checked.value)] : null;
+        if (!session) {
+            Swal.fire({ icon: 'error', title: '資料不完整', text: '請選擇試聽日期。', confirmButtonColor: '#06C755' });
+            return;
         }
+        const trial = { course: session.course, trial_date: session.start.slice(0, 10), trial_time: session.start.slice(11, 16), trial_start: session.start, trial_end: session.end };
 
         const submitBtn = document.getElementById("submitBtn");
         submitBtn.disabled = true;
