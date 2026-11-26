@@ -68,6 +68,11 @@
         </div>
 
         <div class="form-group">
+            <label for="school">學校（選填）</label>
+            <input type="text" id="school" placeholder="例如：建台國中">
+        </div>
+
+        <div class="form-group">
             <label for="course">想試聽的課程 <span style="color:red">*</span></label>
             <select id="course" required disabled>
                 <option value="">⏳ 課程載入中...</option>
@@ -422,6 +427,7 @@
         const payload = {
             name: document.getElementById("name").value.trim(),
             grade: document.getElementById("grade").value,
+            school: document.getElementById("school").value.trim(),
             course: trial.course,                   // 實際班級名稱（含季別），ERP 入班用
             course_label: selectedCourse.label,     // 家長看到的名稱
             trial_date: trial.trial_date,
